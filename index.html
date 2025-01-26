@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<body>
+
+  <h1>ESP32 Data Test</h1>
+
+  <div id="connectionInstructions">
+    <p>1. Connect to the ESP32's Wi-Fi network: "ESP32-Sensor"</p>
+    <p>2. Click the "Connect" button below.</p>
+  </div>
+
+  <button onclick="connectToESP32()">Connect</button>
+
+  <div>
+    <input type="text" id="dataToSend" placeholder="Enter data to send">
+    <button onclick="sendDataToESP32()">Send Data</button>
+  </div>
+
+  <div id="esp32Data"></div>
+
+  <script>
+    function connectToESP32() {
+      // If ESP32 is an access point, its IP is usually known (e.g., 192.168.4.1)
+      const esp32IP = "192.168.4.1";
+      const dataUrl = 'http://' + esp32IP + '/data';
+
+      // Fetch data from ESP32 every second
+      setInterval(() => {
+        fetch(dataUrl)
+          .then(response => response.json())
+          .then(data => {
+            document.getElementById("esp32Data").innerText = 
+              "Message: " + data.message + "\nReceived: " + data.received;
+          })
+          .catch(error => {
+            console.error("Error fetching data:", error);
+          });
+      }, 1000);
+    }
+
+    function sendDataToESP32() {
+      const esp32IP = "192.168.4.1";
+      const dataToSend = document.getElementById("dataToSend").value;
+      const url = `http://${esp32IP}/receive`;
+
+      fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `data=${dataToSend}`,
+      })
+      .then(response => {
+        if (response.ok) {
+          console.log('Data sent successfully');
+        } else {
+          console.error('Error sending data');
+        }
+      })
+      .catch(error => {
+        console.error('Error sending data:', error);
+      });
+    }
+  </script>
+
+</body>
+</html>
