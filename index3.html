@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>ESP32 Web Bluetooth Spectrophotometer</title>
+<link type="text/css" rel="stylesheet" href="https://unpkg.com/bootstrap/dist/css/bootstrap.min.css" />
+<link type="text/css" rel="stylesheet" href="https://unpkg.com/bootstrap-vue@latest/dist/bootstrap-vue.min.css" />
+</head>
+<body>
+    <div id="app">
+        <b-tabs>
+          <b-tab title="Configuration" active>
+            <div id="status">Status: Not connected</div>
+            <button id="connectButton">Connect</button>
+            <button id="disconnectButton" disabled>Disconnect</button>
+            <input type="text" id="messageInput" placeholder="Enter message">
+            <button id="sendButton" disabled>Send</button>
+            <button id="redLEDButton">Red LED</button>
+            <button id="greenLEDButton">Green LED</button>
+            <button id="blueLEDButton">Blue LED</button>
+            <button id="setZeroButton">Set Zero</button>
+          </b-tab>
+          <b-tab title="Samples">
+            <button id="takeReadingButton">Take Reading</button>
+            <table id="data-table" class="table table-striped"> 
+              <thead>
+                <tr>
+                  <th>Sample No.</th>
+                  <th>Time</th>
+                  <th>Absorbance</th>
+                  <th>Concentration</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, index) in tableData":key="index">
+                  <td>{{ index + 1 }}</td>
+                  <td>{{ row.time }}</td>
+                  <td>{{ row.absorbance }}</td>
+                  <td>{{ row.concentration }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </b-tab>
+              <b-tab title="Logs">
+                <table id="log-table">
+                  <thead>
+                    <tr>
+                      <th>Message</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(log, index) in logMessages":key="index">
+                        <td>{{ log.timestamp.toLocaleString() }}</td>
+                        <td>{{ log.message }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </b-tab>
+        </b-tabs>
+      </div>
+      <script src="https://unpkg.com/vue@2/dist/vue.js"></script> 
+      <script src="https://unpkg.com/bootstrap-vue@latest/dist/bootstrap-vue.min.js"></script>
+
+      <script>
+        let app; // Declare app as a global variable
+    
+        app = new Vue({
+          el: '#app',
+          data() {
+            return {
+              tableData: [],
+              logMessages: []
+            };
+          },
+          methods: {
+  addDataToTable(dataValue) {
+  const newRow = {
+    time: new Date().toLocaleTimeString('en-US', { hour12: false }), // 24-hour format
+    absorbance: parseFloat(dataValue),
+    concentration: null
+  };
+  this.tableData.push(newRow);
+},
+            addLog(message) {
+                const newLog = {
+                    message: message,
+                    timestamp: new Date() // Add the current date and time
+                };
+                this.logMessages.push(newLog);
+            }
+          }
+        });
+      </script>
+
+  <script>
+    const connectButton = document.getElementById('connectButton');
+    const disconnectButton = document.getElementById('disconnectButton');
+    const messageInput = document.getElementById('messageInput');
+    const sendButton = document.getElementById('sendButton');
+    const statusDiv = document.getElementById('status');
+    
+
+    let device = null;
+    let characteristicTX = null;
+    let characteristicRX = null;
+
+    async function connect() {
+      try {
+        console.log('Requesting Bluetooth Device...');
+        const device = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true, // Consider using filters for better security
+          optionalServices: ['79daf682-341b-42b5-891a-1647a8a9517b'] // Replace with your service UUID
+        });
+
+        console.log('> Name:             ' + device.name);
+        console.log('> Id:               ' + device.id);
+        console.log('> Connected:        ' + device.gatt.connected);
+
+        console.log('Connecting to GATT Server...');
+        const server = await device.gatt.connect();
+
+        console.log('Getting Service...');
+        const service = await server.getPrimaryService('79daf682-341b-42b5-891a-1647a8a9517b'); // Replace with your service UUID
+
+        console.log('Getting Characteristics...');
+        characteristicTX = await service.getCharacteristic('b6f055b0-cb3f-4c99-8098-2a793916bada'); // Replace with your TX characteristic UUID
+        characteristicRX = await service.getCharacteristic('daa5f483-1420-4f26-9095-165d8fc6a321'); // Replace with your RX characteristic UUID
+
+        // Read initial value from TX characteristic (if needed)
+        const initialValue = await characteristicTX.readValue();
+        const decoder = new TextDecoder('utf-8');
+        console.log('Initial TX value:', decoder.decode(initialValue));
+
+        // Enable notifications for the TX characteristic
+        await characteristicTX.startNotifications();
+        characteristicTX.addEventListener('characteristicvaluechanged', handleIncomingData);
+        console.log('Notifications enabled');
+
+        // Enable the send button
+        sendButton.disabled = false;
+
+        // **CORRECTED PART:** Update the status and enable/disable buttons
+        statusDiv.textContent = 'Status: Connected'; // Update status to connected
+        connectButton.disabled = true;
+        disconnectButton.disabled = false;
+
+        alert('Connected successfully!');
+
+      } catch (error) {
+        console.error('Error in connection process:', error);
+        alert('Connection failed: ' + error.message);
+      }
+    }
+
+    function handleIncomingData(event) {
+        const value = new TextDecoder().decode(event.target.value);
+        console.log('Received:', value);
+
+        if (value.startsWith('d:')) {
+            const dataValue = value.substring(2);
+            app.addDataToTable(dataValue);
+        } else { // Remove the unnecessary condition here
+            app.addLog(value);
+        }
+    }
+
+    function disconnect() {
+      if (device) {
+        if (characteristicTX) {
+          characteristicTX.removeEventListener('characteristicvaluechanged', handleIncomingData);
+          characteristicTX.stopNotifications()
+          .catch(error => {
+            console.error('Error stopping notifications:', error);
+          });
+        }
+        device.gatt.disconnect();
+
+        // Update the status and enable/disable buttons
+        statusDiv.textContent = 'Status: Disconnected';
+        connectButton.disabled = false;
+        disconnectButton.disabled = true;
+        sendButton.disabled = true;
+      }
+    }
+
+async function send(message) { // Add a message parameter
+  if (message && characteristicRX) { 
+    try {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(message);
+      await characteristicRX.writeValue(data);
+      messageInput.value = ''; // Clear the input field (optional)
+      console.log('Sent message:', message);
+    } catch (error) {
+      console.error('Error sending message:', error);
+      statusDiv.textContent = 'Error sending message: ' + error.message;
+    }
+  }
+}
+
+    connectButton.addEventListener('click', connect);
+    disconnectButton.addEventListener('click', disconnect);
+    sendButton.addEventListener('click', send);
+   
+        takeReadingButton.addEventListener('click', () => {
+        send('READ_SENSOR');
+        });
+
+        setZeroButton.addEventListener('click', () => {
+        send('LED_ON');
+        });
+
+        redLEDButton.addEventListener('click', () => {
+        send('LED_ON');
+        });
+
+        greenLEDButton.addEventListener('click', () => {
+        send('LED_ON');
+        });
+
+        blueLEDButton.addEventListener('click', () => {
+        send('TURN_ON_BLUE');
+        });
+  </script>
+</body>
+</html>
