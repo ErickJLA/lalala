@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>ESP32 Web Bluetooth</title>
+  <style>
+    body {
+      font-family: sans-serif;
+    }
+    #status {
+      margin-bottom: 10px;
+      font-weight: bold;
+    }
+    #receivedData {
+      margin-top: 20px;
+      white-space: pre-wrap; /* Preserve formatting for received data */
+    }
+  </style>
+</head>
+<body>
+  <h1>ESP32 Web Bluetooth 1.0</h1>
+  <div id="status">Status: Not connected</div>
+
+  <button id="connectButton">Connect</button>
+  <button id="disconnectButton" disabled>Disconnect</button>
+
+  <input type="text" id="messageInput" placeholder="Enter message">
+  <button id="sendButton" disabled>Send</button>
+
+  <button id="ledOnButton">LED ON</button>
+  <button id="ledOffButton">LED OFF</button>
+  <button id="readSensorButton">Read Sensor</button>
+  <button id="startMotorButton">Start Motor</button>
+  <button id="stopMotorButton">Stop Motor</button>
+
+  <div id="receivedData"></div>
+
+  <script>
+    const connectButton = document.getElementById('connectButton');
+    const disconnectButton = document.getElementById('disconnectButton');
+    const messageInput = document.getElementById('messageInput');
+    const sendButton = document.getElementById('sendButton');
+    const statusDiv = document.getElementById('status');
+    const receivedDataDiv = document.getElementById('receivedData');
+    const ledOnButton = document.getElementById('ledOnButton');
+    const ledOffButton = document.getElementById('ledOffButton');
+    const readSensorButton = document.getElementById('readSensorButton');
+    const startMotorButton = document.getElementById('startMotorButton');
+    const stopMotorButton = document.getElementById('stopMotorButton');
+
+    let device = null;
+    let characteristicTX = null;
+    let characteristicRX = null;
+
+    async function connect() {
+      try {
+        console.log('Requesting Bluetooth Device...');
+        const device = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true, // Consider using filters for better security
+          optionalServices: ['79daf682-341b-42b5-891a-1647a8a9517b'] // Replace with your service UUID
+        });
+
+        console.log('> Name:             ' + device.name);
+        console.log('> Id:               ' + device.id);
+        console.log('> Connected:        ' + device.gatt.connected);
+
+        console.log('Connecting to GATT Server...');
+        const server = await device.gatt.connect();
+
+        console.log('Getting Service...');
+        const service = await server.getPrimaryService('79daf682-341b-42b5-891a-1647a8a9517b'); // Replace with your service UUID
+
+        console.log('Getting Characteristics...');
+        characteristicTX = await service.getCharacteristic('b6f055b0-cb3f-4c99-8098-2a793916bada'); // Replace with your TX characteristic UUID
+        characteristicRX = await service.getCharacteristic('daa5f483-1420-4f26-9095-165d8fc6a321'); // Replace with your RX characteristic UUID
+
+        // Read initial value from TX characteristic (if needed)
+        const initialValue = await characteristicTX.readValue();
+        const decoder = new TextDecoder('utf-8');
+        console.log('Initial TX value:', decoder.decode(initialValue));
+
+        // Enable notifications for the TX characteristic
+        await characteristicTX.startNotifications();
+        characteristicTX.addEventListener('characteristicvaluechanged', handleIncomingData);
+        console.log('Notifications enabled');
+
+        // Enable the send button
+        sendButton.disabled = false;
+
+        // **CORRECTED PART:** Update the status and enable/disable buttons
+        statusDiv.textContent = 'Status: Connected'; // Update status to connected
+        connectButton.disabled = true;
+        disconnectButton.disabled = false;
+
+        alert('Connected successfully!');
+
+      } catch (error) {
+        console.error('Error in connection process:', error);
+        alert('Connection failed: ' + error.message);
+      }
+    }
+
+    function handleIncomingData(event) {
+      const value = new TextDecoder().decode(event.target.value);
+      console.log('Received:', value);
+      receivedDataDiv.textContent += value + '\n'; // Add received data to the div
+    }
+
+    function disconnect() {
+      if (device) {
+        if (characteristicTX) {
+          characteristicTX.removeEventListener('characteristicvaluechanged', handleIncomingData);
+          characteristicTX.stopNotifications()
+          .catch(error => {
+            console.error('Error stopping notifications:', error);
+          });
+        }
+        device.gatt.disconnect();
+
+        // Update the status and enable/disable buttons
+        statusDiv.textContent = 'Status: Disconnected';
+        connectButton.disabled = false;
+        disconnectButton.disabled = true;
+        sendButton.disabled = true;
+      }
+    }
+
+async function send(message) { // Add a message parameter
+  if (message && characteristicRX) { 
+    try {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(message);
+      await characteristicRX.writeValue(data);
+      messageInput.value = ''; // Clear the input field (optional)
+      console.log('Sent message:', message);
+    } catch (error) {
+      console.error('Error sending message:', error);
+      statusDiv.textContent = 'Error sending message: ' + error.message;
+    }
+  }
+}
+
+    connectButton.addEventListener('click', connect);
+    disconnectButton.addEventListener('click', disconnect);
+    sendButton.addEventListener('click', send);
+   
+    ledOnButton.addEventListener('click', () => {
+      //alert("LED ON button clicked"); 
+      send('LED_ON');
+    });
+    ledOffButton.addEventListener('click', () => {
+      send('LED_OFF');
+    });
+    readSensorButton.addEventListener('click', () => {
+      send('READ_SENSOR');
+    });
+    startMotorButton.addEventListener('click', () => {
+      send('MOTOR_START');
+    });
+    stopMotorButton.addEventListener('click', () => {
+      send('MOTOR_STOP');
+    });
+  </script>
+</body>
+</html>
